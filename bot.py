@@ -1,6 +1,7 @@
 import os
+import re
+import asyncio
 import aiohttp
-import requests
 import discord
 from aiohttp import web
 from discord.ext import commands
@@ -8,23 +9,40 @@ from discord.ext import commands
 # Kích hoạt Intents đọc tin nhắn
 intents = discord.Intents.default()
 intents.message_content = True
-bot = commands.Bot(command_prefix="!", intents=intents)
+
+class WTBot(commands.Bot):
+    def __init__(self):
+        super().__init__(command_prefix="!", intents=intents)
+
+    async def setup_hook(self):
+        asyncio.create_task(start_server())
+        asyncio.create_task(load_wt_database())
+
+    async def close(self):
+        global SESSION
+        if SESSION and not SESSION.closed:
+            await SESSION.close()
+        await super().close()
+
+bot = WTBot()
 
 # URL chứa dữ liệu mở của toàn bộ phương tiện War Thunder
 WT_DATA_URL = "https://raw.githubusercontent.com/gszep/war-thunder-data/master/data/json/vehicles.json"
 VEHICLES_DB = {}
+SESSION = None
 
 async def load_wt_database():
-    global VEHICLES_DB
+    global VEHICLES_DB, SESSION
     try:
         print("🔄 Đang tải dữ liệu toàn bộ xe War Thunder từ GitHub...")
-        async with aiohttp.ClientSession() as session:
-            async with session.get(WT_DATA_URL, timeout=15) as res:
-                if res.status == 200:
-                    VEHICLES_DB = await res.json()
-                    print(f"✅ Đã tải thành công dữ liệu War Thunder ({len(VEHICLES_DB)} phương tiện)!")
-                else:
-                    print("⚠️ Không thể lấy dữ liệu online, chuyển sang chế độ dự phòng.")
+        if SESSION is None or SESSION.closed:
+            SESSION = aiohttp.ClientSession()
+        async with SESSION.get(WT_DATA_URL, timeout=15) as res:
+            if res.status == 200:
+                VEHICLES_DB = await res.json()
+                print(f"✅ Đã tải thành công dữ liệu War Thunder ({len(VEHICLES_DB)} phương tiện)!")
+            else:
+                print("⚠️ Không thể lấy dữ liệu online, chuyển sang chế độ dự phòng.")
     except Exception as e:
         print(f"❌ Lỗi khi tải dữ liệu: {e}")
 
@@ -43,31 +61,58 @@ async def start_server():
 
 @bot.event
 async def on_ready():
-    bot.loop.create_task(start_server())
-    bot.loop.create_task(load_wt_database())
     print(f"🤖 Bot {bot.user} đã sẵn sàng phân tích chiến thuật War Thunder!")
+
+def _parse_vehicle_data(v_info: dict, query_name: str) -> dict:
+    """Hàm phụ trợ bóc tách thông số xe an toàn"""
+    horse_power = v_info.get("horsePower", 500)
+    mass = v_info.get("mass", 30000)
+    hp_ton = 16.5
+    if isinstance(horse_power, (int, float)) and isinstance(mass, (int, float)) and mass > 0:
+        hp_ton = round(horse_power / (mass / 1000), 1)
+
+    return {
+        "name": str(v_info.get("name") or query_name).strip().upper(),
+        "br": v_info.get("economicRankArcade", 7.0),
+        "hp_ton": hp_ton,
+        "reload": v_info.get("reloadTime", 7.5),
+        "has_stab": v_info.get("hasStabilizer", False),
+        "has_aphe": v_info.get("hasAPHE", True)
+    }
+
+
+def _matches_word_boundary(query: str, text: str) -> bool:
+    pattern = rf"(?<!\w){re.escape(query)}(?!\w)"
+    return re.search(pattern, text, re.IGNORECASE) is not None
+
 
 def find_vehicle(query_name: str):
     """Tìm kiếm xe thông minh trong Database 2000+ xe"""
     query_clean = query_name.strip().lower()
-    
-    # 1. Tìm chính xác hoặc tương đối trong Database
-    if VEHICLES_DB:
-        for v_id, v_info in VEHICLES_DB.items():
-            name = v_info.get("name", "").lower()
-            if query_clean in name or query_clean in v_id.lower():
-                return {
-                    "name": v_info.get("name", query_name.upper()),
-                    "br": v_info.get("economicRankArcade", 7.0),
-                    "hp_ton": round(v_info.get("horsePower", 500) / (v_info.get("mass", 30000) / 1000), 1),
-                    "reload": v_info.get("reloadTime", 7.5),
-                    "has_stab": v_info.get("hasStabilizer", False),
-                    "has_aphe": v_info.get("hasAPHE", True)
-                }
 
-    # 2. Dự phòng nếu tên xe quá mới hoặc không có trong JSON
+    if VEHICLES_DB:
+        # Lượt 1: Tìm CHÍNH XÁC tên xe hoặc v_id
+        for v_id, v_info in VEHICLES_DB.items():
+            name = str(v_info.get("name", "")).lower()
+            v_id_lower = str(v_id).lower()
+            if query_clean == name or query_clean == v_id_lower:
+                return _parse_vehicle_data(v_info, query_name)
+
+        # Lượt 2: Tìm theo whole-word trước, rồi mới substring thô
+        for v_id, v_info in VEHICLES_DB.items():
+            name = str(v_info.get("name", "")).lower()
+            v_id_lower = str(v_id).lower()
+            if _matches_word_boundary(query_clean, name) or _matches_word_boundary(query_clean, v_id_lower):
+                return _parse_vehicle_data(v_info, query_name)
+
+        for v_id, v_info in VEHICLES_DB.items():
+            name = str(v_info.get("name", "")).lower()
+            v_id_lower = str(v_id).lower()
+            if query_clean in name or query_clean in v_id_lower:
+                return _parse_vehicle_data(v_info, query_name)
+
     return {
-        "name": query_name.upper(),
+        "name": query_name.strip().upper(),
         "br": "N/A",
         "hp_ton": 16.5,
         "reload": 7.5,
@@ -124,13 +169,18 @@ def analyze_combat(t1: dict, t2: dict) -> str:
 @bot.command(name="wt")
 async def compare_vehicles(ctx, *, query: str):
     """Cú pháp: !wt <xe 1> vs <xe 2>"""
-    if "vs" not in query.lower():
+    query_text = query.strip()
+    if not re.search(r"\s+vs\s+", query_text, flags=re.IGNORECASE):
         await ctx.send("⚠️ Vui lòng gõ đúng cú pháp: `!wt <Tên Xe 1> vs <Tên Xe 2>`\nVí dụ: `!wt leopard 1 vs m48a1`")
         return
 
-    parts = query.lower().split("vs")
-    t1 = find_vehicle(parts[0])
-    t2 = find_vehicle(parts[1])
+    parts = re.split(r"\s+vs\s+", query_text, maxsplit=1, flags=re.IGNORECASE)
+    if len(parts) < 2 or not parts[0].strip() or not parts[1].strip():
+        await ctx.send("⚠️ Vui lòng nhập đủ tên 2 xe! Ví dụ: `!wt leopard 1 vs m48a1`")
+        return
+
+    t1 = find_vehicle(parts[0].strip())
+    t2 = find_vehicle(parts[1].strip())
 
     embed = discord.Embed(
         title=f"⚔️ PHÂN TÍCH TÁC CHIẾN: {t1['name']} VS {t2['name']}",
