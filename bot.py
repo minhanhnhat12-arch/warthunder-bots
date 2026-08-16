@@ -174,47 +174,87 @@ def analyze_combat(t1: dict, t2: dict) -> str:
     return "\n".join(reasons)
 
 @bot.command(name="wt")
-async def compare_vehicles(ctx, *, query: str):
-    """Cú pháp: !wt <xe 1> vs <xe 2>"""
+async def compare_vehicles(ctx, *, query: str = "help"):
+    """Cú pháp: 
+    - Xem 1 xe: !wt <tên xe>
+    - So sánh 2 xe: !wt <xe 1> vs <xe 2>
+    - Hướng dẫn: !wt help
+    """
     query_text = query.strip()
-    if not re.search(r"\s+vs\s+", query_text, flags=re.IGNORECASE):
-        await ctx.send("⚠️ Vui lòng gõ đúng cú pháp: `!wt <Tên Xe 1> vs <Tên Xe 2>`\nVí dụ: `!wt leopard 1 vs m48a1`")
+
+    # 1. TRƯỜNG HỢP: Hướng dẫn sử dụng
+    if query_text.lower() == "help" or not query_text:
+        embed_help = discord.Embed(
+            title="📖 HƯỚNG DẪN SỬ DỤNG BOT WAR THUNDER",
+            description="Bot hỗ trợ tìm kiếm thông số và phân tích giao tranh giữa các phương tiện.",
+            color=discord.Color.blue()
+        )
+        embed_help.add_field(
+            name="🔍 Xem thông số 1 xe:",
+            value="`!wt <Tên Xe>`\n*Ví dụ:* `!wt t72b3`, `!wt leopard 2a6`",
+            inline=False
+        )
+        embed_help.add_field(
+            name="⚔️ So sánh 2 xe:",
+            value="`!wt <Tên Xe 1> vs <Tên Xe 2>`\n*Ví dụ:* `!wt t72b3 vs m1a2`, `!wt tiger h1 vs t-34-85`",
+            inline=False
+        )
+        await ctx.send(embed=embed_help)
         return
 
-    parts = re.split(r"\s+vs\s+", query_text, maxsplit=1, flags=re.IGNORECASE)
-    if len(parts) < 2 or not parts[0].strip() or not parts[1].strip():
-        await ctx.send("⚠️ Vui lòng nhập đủ tên 2 xe! Ví dụ: `!wt leopard 1 vs m48a1`")
+    # 2. TRƯỜNG HỢP: So sánh 2 xe (có chữ 'vs')
+    if re.search(r"\s+vs\s+", query_text, flags=re.IGNORECASE):
+        parts = re.split(r"\s+vs\s+", query_text, maxsplit=1, flags=re.IGNORECASE)
+        if len(parts) < 2 or not parts[0].strip() or not parts[1].strip():
+            await ctx.send("⚠️ Vui lòng nhập đủ tên 2 xe! Ví dụ: `!wt t72b3 vs m1a2`")
+            return
+
+        t1 = find_vehicle(parts[0].strip())
+        t2 = find_vehicle(parts[1].strip())
+
+        embed = discord.Embed(
+            title=f"⚔️ PHÂN TÍCH TÁC CHIẾN: {t1['name']} VS {t2['name']}",
+            color=discord.Color.gold()
+        )
+        embed.add_field(
+            name=f"📊 {t1['name']}",
+            value=f"• BR: `{t1['br']}`\n• Tỷ lệ HP/tấn: `{t1['hp_ton']} HP/t` \n• Nạp đạn: `{t1['reload']}s`",
+            inline=True
+        )
+        embed.add_field(
+            name=f"📊 {t2['name']}",
+            value=f"• BR: `{t2['br']}`\n• Tỷ lệ HP/tấn: `{t2['hp_ton']} HP/t` \n• Nạp đạn: `{t2['reload']}s`",
+            inline=True
+        )
+
+        analysis = analyze_combat(t1, t2)
+        embed.add_field(
+            name=f"💡 Tại sao {t1['name']} vẫn có thể THUA {t2['name']}?",
+            value=analysis,
+            inline=False
+        )
+        embed.set_footer(text="War Thunder Tactical Engine • Powered by Discord Bot")
+        await ctx.send(embed=embed)
         return
 
-    t1 = find_vehicle(parts[0].strip())
-    t2 = find_vehicle(parts[1].strip())
-
-    embed = discord.Embed(
-        title=f"⚔️ PHÂN TÍCH TÁC CHIẾN: {t1['name']} VS {t2['name']}",
-        color=discord.Color.gold()
+    # 3. TRƯỜNG HỢP: Tra cứu thông số 1 xe
+    t = find_vehicle(query_text)
+    embed_single = discord.Embed(
+        title=f"🛡️ THÔNG SỐ PHƯƠNG TIỆN: {t['name']}",
+        color=discord.Color.green()
     )
+    embed_single.add_field(name="🎯 Chỉ số BR (Battle Rating)", value=f"`{t['br']}`", inline=True)
+    embed_single.add_field(name="⚡ Tỷ lệ Tốc độ (HP/tấn)", value=f"`{t['hp_ton']} HP/t`", inline=True)
+    embed_single.add_field(name="⏱️ Tốc độ nạp đạn", value=f"`{t['reload']}s`", inline=True)
+    
+    stab_text = "✅ Có" if t.get('has_stab') else "❌ Không"
+    aphe_text = "✅ Có" if t.get('has_aphe') else "❌ Không"
+    
+    embed_single.add_field(name="🎯 Bộ cân bằng pháo (Stabilizer)", value=stab_text, inline=True)
+    embed_single.add_field(name="💥 Đạn APHE nổ", value=aphe_text, inline=True)
 
-    embed.add_field(
-        name=f"📊 {t1['name']}",
-        value=f"• BR: `{t1['br']}`\n• Tỷ lệ HP/tấn: `{t1['hp_ton']} HP/t` \n• Nạp đạn: `{t1['reload']}s`",
-        inline=True
-    )
-
-    embed.add_field(
-        name=f"📊 {t2['name']}",
-        value=f"• BR: `{t2['br']}`\n• Tỷ lệ HP/tấn: `{t2['hp_ton']} HP/t` \n• Nạp đạn: `{t2['reload']}s`",
-        inline=True
-    )
-
-    analysis = analyze_combat(t1, t2)
-    embed.add_field(
-        name=f"💡 Tại sao {t1['name']} vẫn có thể THUA {t2['name']}?",
-        value=analysis,
-        inline=False
-    )
-
-    embed.set_footer(text="War Thunder Tactical Engine • Powered by Discord Bot")
-    await ctx.send(embed=embed)
+    embed_single.set_footer(text="Gõ '!wt <xe1> vs <xe2>' để so sánh với xe khác")
+    await ctx.send(embed=embed_single)
 
 # Lấy Token an toàn từ biến môi trường của Host
 TOKEN = os.getenv("DISCORD_TOKEN")
