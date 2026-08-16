@@ -28,8 +28,9 @@ class WTBot(commands.Bot):
 
 bot = WTBot()
 
-WT_DATA_URL = "https://raw.githubusercontent.com/gszep/war-thunder-data/master/data/json/vehicles.json"
+WT_DATA_URL = "https://raw.githubusercontent.com/wt-db/wt-db/main/db/units.json"
 VEHICLES_DB = {}
+VEHICLE_INDEX = {}
 SESSION = None
 
 PRESET_VEHICLES = {
@@ -51,7 +52,14 @@ DEFAULT_VEHICLE = {
 
 
 def _normalize_vehicle_key(value) -> str:
-    return re.sub(r"[\s\-_]", "", str(value).lower())
+    """Xóa ký tự đặc biệt & prefix quốc gia để match chuẩn hơn"""
+    text = str(value).lower()
+    text = re.sub(r'^(ussr_|germ_|us_|uk_|jp_|cn_|it_|fr_|se_)', '', text)
+    return re.sub(r"[\s\-_]", "", text).replace("\u00a0", "")
+
+
+def _normalize_vehicle_name(value) -> str:
+    return _normalize_vehicle_key(value).replace("\u00a0", "")
 
 
 def _safe_bool(value, default=False):
@@ -59,8 +67,35 @@ def _safe_bool(value, default=False):
         return default
     return bool(value)
 
+
+def _build_vehicle_index(db):
+    index = {}
+    if not isinstance(db, dict):
+        return index
+
+    for v_id, v_info in db.items():
+        if not isinstance(v_info, dict):
+            continue
+
+        aliases = []
+        raw_name = v_info.get("loc_name") or v_info.get("name") or str(v_id)
+        aliases.append(raw_name)
+        aliases.append(str(v_id))
+
+        for key in ("identifier", "id", "name", "loc_name"):
+            val = v_info.get(key)
+            if val:
+                aliases.append(str(val))
+
+        for alias in aliases:
+            key = _normalize_vehicle_name(alias)
+            if key:
+                index[key] = v_info
+
+    return index
+
 async def load_wt_database():
-    global VEHICLES_DB, SESSION
+    global VEHICLES_DB, SESSION, VEHICLE_INDEX
     try:
         print("🔄 Đang tải dữ liệu toàn bộ xe War Thunder...")
         if SESSION is None or SESSION.closed:
@@ -68,7 +103,9 @@ async def load_wt_database():
         async with SESSION.get(WT_DATA_URL, timeout=15) as res:
             if res.status == 200:
                 VEHICLES_DB = await res.json()
+                VEHICLE_INDEX = _build_vehicle_index(VEHICLES_DB)
                 print(f"✅ Đã tải thành công dữ liệu ({len(VEHICLES_DB)} phương tiện)!")
+                print(f"✅ Đã tạo index tìm kiếm cho {len(VEHICLE_INDEX)} alias xe.")
     except Exception as e:
         print(f"❌ Lỗi khi tải dữ liệu: {e}")
 
@@ -93,25 +130,67 @@ async def on_ready():
     print(f"🤖 Bot {bot.user} đã ONLINE!")
 
 def _parse_vehicle_data(v_info: dict, query_name: str) -> dict:
-    name = v_info.get("name") or v_info.get("identifier") or query_name
+    """Bóc tách dữ liệu chuẩn 100% từ Datamine Gaijin (An toàn, chống Crash)"""
+    name = v_info.get("loc_name") or v_info.get("name") or query_name
 
-    br_raw = v_info.get("economicRankRealistic") or v_info.get("economicRankArcade")
-    if isinstance(br_raw, (int, float)) and br_raw > 0:
-        br = str(round(br_raw / 3 + 1, 1))
+    rank_rb = v_info.get("economicRankHistorical") or v_info.get("economicRankArcade") or 0
+    try:
+        rank_val = float(rank_rb)
+        br = str(round(rank_val / 3 + 1, 1)) if rank_val > 0 else "N/A"
+    except (ValueError, TypeError):
+        br = "N/A"
+
+    engine_data = v_info.get("engine") or v_info.get("horsePower") or 0
+    if isinstance(engine_data, dict):
+        engine_hp = engine_data.get("horsePower", 0) or engine_data.get("power", 0)
     else:
-        br = str(v_info.get("br") or DEFAULT_VEHICLE["br"])
+        engine_hp = engine_data
 
-    hp = v_info.get("horsePower") or v_info.get("enginePower") or 700
-    mass = v_info.get("mass") or v_info.get("weight") or 75000
+    mass_kg = v_info.get("mass") or v_info.get("weight") or 0
 
-    if isinstance(hp, (int, float)) and isinstance(mass, (int, float)) and mass > 0:
-        hp_ton = round(hp / (mass / 1000), 1)
-    else:
-        hp_ton = DEFAULT_VEHICLE["hp_ton"]
+    try:
+        hp_num = float(engine_hp)
+        mass_num = float(mass_kg)
+        if hp_num > 0 and mass_num > 0:
+            hp_ton = round(hp_num / (mass_num / 1000), 1)
+        else:
+            hp_ton = "N/A"
+    except (ValueError, TypeError):
+        hp_ton = "N/A"
 
-    reload_sec = v_info.get("reloadTime") or v_info.get("reload_time") or DEFAULT_VEHICLE["reload"]
-    has_stab = _safe_bool(v_info.get("hasStabilizer", v_info.get("stabilizer", False)))
-    has_aphe = _safe_bool(v_info.get("hasAPHE", v_info.get("aphe", True)))
+    reload_candidates = []
+    for key in ("reloadTime", "reload_time"):
+        reload_candidates.append(v_info.get(key))
+
+    gun_data = v_info.get("gun") or {}
+    if isinstance(gun_data, dict):
+        reload_candidates.extend([gun_data.get("reloadTime"), gun_data.get("reload_time")])
+
+    turret_data = v_info.get("turret") or {}
+    if isinstance(turret_data, dict):
+        reload_candidates.extend([turret_data.get("reloadTime"), turret_data.get("reload_time")])
+
+    weapons = v_info.get("weapons") or []
+    if isinstance(weapons, list):
+        for weapon in weapons:
+            if not isinstance(weapon, dict):
+                continue
+            reload_candidates.append(weapon.get("reloadTime"))
+            reload_candidates.append(weapon.get("reload_time"))
+            if isinstance(weapon.get("turret"), dict):
+                reload_candidates.append(weapon["turret"].get("reloadTime"))
+                reload_candidates.append(weapon["turret"].get("reload_time"))
+
+    reload_time = next((item for item in reload_candidates if item not in (None, 0, "", [])), 0)
+
+    try:
+        reload_val = float(reload_time)
+        reload_sec = round(reload_val, 1) if reload_val > 0 else "N/A"
+    except (ValueError, TypeError):
+        reload_sec = "N/A"
+
+    has_stab = bool(v_info.get("hasStabilizer") or v_info.get("stabilizer", False))
+    has_aphe = bool(v_info.get("hasAPHE") or "aphe" in str(v_info.get("ammo", "")).lower())
 
     return {
         "name": str(name).replace("_", " ").upper(),
@@ -129,16 +208,26 @@ def find_vehicle(query_name: str):
     if q_clean in PRESET_VEHICLES:
         return PRESET_VEHICLES[q_clean]
 
-    if VEHICLES_DB:
-        for v_id, v_info in VEHICLES_DB.items():
-            clean_id = _normalize_vehicle_key(v_id)
-            clean_name = _normalize_vehicle_key(v_info.get("name") or v_info.get("identifier") or "")
+    if VEHICLE_INDEX:
+        exact_match = VEHICLE_INDEX.get(q_clean)
+        if exact_match:
+            parsed = _parse_vehicle_data(exact_match, query_name)
+            if parsed["br"] in ("N/A", "1.0"):
+                parsed["br"] = "6.7"
+            return parsed
 
-            if q_clean == clean_id or q_clean == clean_name or q_clean in clean_id or q_clean in clean_name:
-                parsed = _parse_vehicle_data(v_info, query_name)
-                if parsed["br"] in ("N/A", "1.0"):
-                    parsed["br"] = "6.7"
-                return parsed
+        matches = []
+        for key, v_info in VEHICLE_INDEX.items():
+            if q_clean in key:
+                matches.append((key, v_info))
+
+        if matches:
+            matches.sort(key=lambda x: len(x[0]))
+            best_match = matches[0][1]
+            parsed = _parse_vehicle_data(best_match, query_name)
+            if parsed["br"] in ("N/A", "1.0"):
+                parsed["br"] = "6.7"
+            return parsed
 
     fallback = dict(DEFAULT_VEHICLE)
     fallback["name"] = query_name.strip().upper()
