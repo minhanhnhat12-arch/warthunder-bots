@@ -28,23 +28,47 @@ class WTBot(commands.Bot):
 
 bot = WTBot()
 
-# URL chứa dữ liệu mở của toàn bộ phương tiện War Thunder
 WT_DATA_URL = "https://raw.githubusercontent.com/gszep/war-thunder-data/master/data/json/vehicles.json"
 VEHICLES_DB = {}
 SESSION = None
 
+PRESET_VEHICLES = {
+    "jagdtiger": {"name": "JAGDTIGER", "br": "6.7", "hp_ton": 9.3, "reload": 18.0, "has_stab": False, "has_aphe": True},
+    "t72b3": {"name": "T-72B3", "br": "11.3", "hp_ton": 24.1, "reload": 7.1, "has_stab": True, "has_aphe": False},
+    "leopard2a6": {"name": "LEOPARD 2A6", "br": "11.7", "hp_ton": 24.1, "reload": 6.0, "has_stab": True, "has_aphe": False},
+    "m1a2": {"name": "M1A2 ABRAMS", "br": "11.7", "hp_ton": 24.0, "reload": 5.0, "has_stab": True, "has_aphe": False},
+    "t80bvm": {"name": "T-80BVM", "br": "11.7", "hp_ton": 27.3, "reload": 6.5, "has_stab": True, "has_aphe": False},
+}
+
+DEFAULT_VEHICLE = {
+    "name": "UNKNOWN VEHICLE",
+    "br": "6.7",
+    "hp_ton": 12.5,
+    "reload": 10.0,
+    "has_stab": False,
+    "has_aphe": True,
+}
+
+
+def _normalize_vehicle_key(value) -> str:
+    return re.sub(r"[\s\-_]", "", str(value).lower())
+
+
+def _safe_bool(value, default=False):
+    if value is None:
+        return default
+    return bool(value)
+
 async def load_wt_database():
     global VEHICLES_DB, SESSION
     try:
-        print("🔄 Đang tải dữ liệu toàn bộ xe War Thunder từ GitHub...")
+        print("🔄 Đang tải dữ liệu toàn bộ xe War Thunder...")
         if SESSION is None or SESSION.closed:
             SESSION = aiohttp.ClientSession()
         async with SESSION.get(WT_DATA_URL, timeout=15) as res:
             if res.status == 200:
                 VEHICLES_DB = await res.json()
-                print(f"✅ Đã tải thành công dữ liệu War Thunder ({len(VEHICLES_DB)} phương tiện)!")
-            else:
-                print("⚠️ Không thể lấy dữ liệu online, chuyển sang chế độ dự phòng.")
+                print(f"✅ Đã tải thành công dữ liệu ({len(VEHICLES_DB)} phương tiện)!")
     except Exception as e:
         print(f"❌ Lỗi khi tải dữ liệu: {e}")
 
@@ -59,206 +83,124 @@ async def start_server():
     port = int(os.environ.get("PORT", 8080))
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-    print(f"🌐 Health check server đang chạy trên cổng {port}")
 
 @bot.event
 async def on_ready():
-    # Đổi trạng thái hoạt động giúp bot sáng đèn Online rõ ràng
     await bot.change_presence(
         status=discord.Status.online,
-        activity=discord.Game(name="War Thunder | !wt <xe1> vs <xe2>")
+        activity=discord.Game(name="War Thunder | !wt <xe>")
     )
-    print(f"🤖 Bot {bot.user} đã ONLINE và ready phân tích chiến thuật War Thunder!")
+    print(f"🤖 Bot {bot.user} đã ONLINE!")
 
 def _parse_vehicle_data(v_info: dict, query_name: str) -> dict:
-    """Hàm phụ trợ bóc tách thông số xe an toàn"""
-    horse_power = v_info.get("horsePower", 500)
-    mass = v_info.get("mass", 30000)
-    hp_ton = 16.5
-    if isinstance(horse_power, (int, float)) and isinstance(mass, (int, float)) and mass > 0:
-        hp_ton = round(horse_power / (mass / 1000), 1)
+    name = v_info.get("name") or v_info.get("identifier") or query_name
+
+    br_raw = v_info.get("economicRankRealistic") or v_info.get("economicRankArcade")
+    if isinstance(br_raw, (int, float)) and br_raw > 0:
+        br = str(round(br_raw / 3 + 1, 1))
+    else:
+        br = str(v_info.get("br") or DEFAULT_VEHICLE["br"])
+
+    hp = v_info.get("horsePower") or v_info.get("enginePower") or 700
+    mass = v_info.get("mass") or v_info.get("weight") or 75000
+
+    if isinstance(hp, (int, float)) and isinstance(mass, (int, float)) and mass > 0:
+        hp_ton = round(hp / (mass / 1000), 1)
+    else:
+        hp_ton = DEFAULT_VEHICLE["hp_ton"]
+
+    reload_sec = v_info.get("reloadTime") or v_info.get("reload_time") or DEFAULT_VEHICLE["reload"]
+    has_stab = _safe_bool(v_info.get("hasStabilizer", v_info.get("stabilizer", False)))
+    has_aphe = _safe_bool(v_info.get("hasAPHE", v_info.get("aphe", True)))
 
     return {
-        "name": str(v_info.get("name") or query_name).strip().upper(),
-        "br": v_info.get("economicRankArcade", 7.0),
+        "name": str(name).replace("_", " ").upper(),
+        "br": br,
         "hp_ton": hp_ton,
-        "reload": v_info.get("reloadTime", 7.5),
-        "has_stab": v_info.get("hasStabilizer", False),
-        "has_aphe": v_info.get("hasAPHE", True)
+        "reload": reload_sec,
+        "has_stab": has_stab,
+        "has_aphe": has_aphe,
     }
-
-
-def _matches_word_boundary(query: str, text: str) -> bool:
-    pattern = rf"(?<!\w){re.escape(query)}(?!\w)"
-    return re.search(pattern, text, re.IGNORECASE) is not None
 
 
 def find_vehicle(query_name: str):
-    """Tìm kiếm xe thông minh trong Database 2000+ xe"""
-    query_clean = query_name.strip().lower()
+    q_clean = _normalize_vehicle_key(query_name)
+
+    if q_clean in PRESET_VEHICLES:
+        return PRESET_VEHICLES[q_clean]
 
     if VEHICLES_DB:
-        # Lượt 1: Tìm CHÍNH XÁC tên xe hoặc v_id
         for v_id, v_info in VEHICLES_DB.items():
-            name = str(v_info.get("name", "")).lower()
-            v_id_lower = str(v_id).lower()
-            if query_clean == name or query_clean == v_id_lower:
-                return _parse_vehicle_data(v_info, query_name)
+            clean_id = _normalize_vehicle_key(v_id)
+            clean_name = _normalize_vehicle_key(v_info.get("name") or v_info.get("identifier") or "")
 
-        # Lượt 2: Tìm theo whole-word trước, rồi mới substring thô
-        for v_id, v_info in VEHICLES_DB.items():
-            name = str(v_info.get("name", "")).lower()
-            v_id_lower = str(v_id).lower()
-            if _matches_word_boundary(query_clean, name) or _matches_word_boundary(query_clean, v_id_lower):
-                return _parse_vehicle_data(v_info, query_name)
+            if q_clean == clean_id or q_clean == clean_name or q_clean in clean_id or q_clean in clean_name:
+                parsed = _parse_vehicle_data(v_info, query_name)
+                if parsed["br"] in ("N/A", "1.0"):
+                    parsed["br"] = "6.7"
+                return parsed
 
-        for v_id, v_info in VEHICLES_DB.items():
-            name = str(v_info.get("name", "")).lower()
-            v_id_lower = str(v_id).lower()
-            if query_clean in name or query_clean in v_id_lower:
-                return _parse_vehicle_data(v_info, query_name)
-
-    return {
-        "name": query_name.strip().upper(),
-        "br": "N/A",
-        "hp_ton": 16.5,
-        "reload": 7.5,
-        "has_stab": False,
-        "has_aphe": True
-    }
+    fallback = dict(DEFAULT_VEHICLE)
+    fallback["name"] = query_name.strip().upper()
+    return fallback
 
 def analyze_combat(t1: dict, t2: dict) -> str:
-    """Thuật toán ma trận phân tích lý do xe A thua xe B"""
     reasons = []
-
-    # Phân tích Sát thương đạn
     if t2.get('has_aphe'):
-        reasons.append(
-            f"• **Sát thương đạn APHE nổ vụn:** Nếu {t2['name']} bắn đục lủng giáp {t1['name']}, "
-            f"mảnh văng đạn nổ APHE sẽ quét sạch kíp lái trong buồng lái ngay lập tức."
-        )
+        reasons.append(f"• **Sát thương đạn APHE:** {t2['name']} bắn đục giáp sẽ quét sạch kíp lái {t1['name']}.")
+    
+    r1, r2 = t1.get('reload', 7.5), t2.get('reload', 7.5)
+    if isinstance(r1, (int, float)) and isinstance(r2, (int, float)) and r1 > r2:
+        reasons.append(f"• **Tốc độ bắn:** {t2['name']} nạp đạn nhanh hơn ({r2}s vs {r1}s), dễ bắn bồi trong CQB.")
 
-    # Phân tích Tốc độ nạp đạn
-    r1 = t1.get('reload', 7.5)
-    r2 = t2.get('reload', 7.5)
-    if isinstance(r1, (int, float)) and isinstance(r2, (int, float)):
-        if r1 > r2:
-            reasons.append(
-                f"• **Lợi thế tốc độ nạp đạn:** {t2['name']} nạp đạn nhanh hơn. "
-                f"Trong giao tranh cận chiến (CQB), nếu {t1['name']} bắn hụt hoặc chỉ đục hỏng xích/pháo, {t2['name']} sẽ có cơ hội phản công ngay."
-            )
-
-    # Phân tích Bộ cân bằng pháo (Stabilizer)
     if not t1.get('has_stab') and t2.get('has_stab'):
-        reasons.append(
-            f"• **Khả năng kê tâm (Stabilizer):** {t2['name']} có Stabilizer giúp di chuyển vẫn dừng bắn được ngay. "
-            f"{t1['name']} không có Stab nên khi dừng xe pháo sẽ bị nảy mạnh, mất 1-2s mới ổn định tâm."
-        )
+        reasons.append(f"• **Kê tâm (Stabilizer):** {t2['name']} vừa chạy vừa bắn được ngay, {t1['name']} phải chờ nảy tâm 1-2s.")
 
-    # Phân tích Cơ động / Móc lốp
-    hp1 = t1.get('hp_ton', 15)
-    hp2 = t2.get('hp_ton', 15)
-    if isinstance(hp1, (int, float)) and isinstance(hp2, (int, float)):
-        if hp1 < hp2:
-            reasons.append(
-                f"• **Thế trận Móc Lốp (Flank):** {t2['name']} cơ động hơn ({hp2} HP/tấn). "
-                f"Nếu biết tận dụng bản đồ đi vòng ra sườn hoặc sau lưng, giáp mặt của {t1['name']} trâu đến đâu cũng bị vô hiệu hóa."
-            )
+    hp1, hp2 = t1.get('hp_ton', 15), t2.get('hp_ton', 15)
+    if isinstance(hp1, (int, float)) and isinstance(hp2, (int, float)) and hp1 < hp2:
+        reasons.append(f"• **Cơ động (Flank):** {t2['name']} cơ động hơn ({hp2} HP/t), dễ móc sườn {t1['name']}.")
 
     if not reasons:
-        reasons.append(
-            f"• **Yếu tố Tay Nghề & Góc Kê (Angling):** Kết quả phụ thuộc vào việc ai nhìn thấy đối phương trước, "
-            f"kỹ năng giấu gầm (Hull-down) và cách nghiêng giáp góc 45 độ của người chơi."
-        )
+        reasons.append(f"• **Kỹ năng người chơi:** Phụ thuộc vào góc kê (Angling) và ai nhìn thấy đối phương trước.")
 
     return "\n".join(reasons)
 
 @bot.command(name="wt")
 async def compare_vehicles(ctx, *, query: str = "help"):
-    """Cú pháp: 
-    - Xem 1 xe: !wt <tên xe>
-    - So sánh 2 xe: !wt <xe 1> vs <xe 2>
-    - Hướng dẫn: !wt help
-    """
     query_text = query.strip()
 
-    # 1. TRƯỜNG HỢP: Hướng dẫn sử dụng
     if query_text.lower() == "help" or not query_text:
         embed_help = discord.Embed(
             title="📖 HƯỚNG DẪN SỬ DỤNG BOT WAR THUNDER",
-            description="Bot hỗ trợ tìm kiếm thông số và phân tích giao tranh giữa các phương tiện.",
+            description="Bot tra cứu thông số & phân tích giao tranh War Thunder.",
             color=discord.Color.blue()
         )
-        embed_help.add_field(
-            name="🔍 Xem thông số 1 xe:",
-            value="`!wt <Tên Xe>`\n*Ví dụ:* `!wt t72b3`, `!wt leopard 2a6`",
-            inline=False
-        )
-        embed_help.add_field(
-            name="⚔️ So sánh 2 xe:",
-            value="`!wt <Tên Xe 1> vs <Tên Xe 2>`\n*Ví dụ:* `!wt t72b3 vs m1a2`, `!wt tiger h1 vs t-34-85`",
-            inline=False
-        )
+        embed_help.add_field(name="🔍 Tra cứu 1 xe:", value="`!wt jagdtiger` | `!wt t72b3`", inline=False)
+        embed_help.add_field(name="⚔️ So sánh 2 xe:", value="`!wt jagdtiger vs t72b3`", inline=False)
         await ctx.send(embed=embed_help)
         return
 
-    # 2. TRƯỜNG HỢP: So sánh 2 xe (có chữ 'vs')
     if re.search(r"\s+vs\s+", query_text, flags=re.IGNORECASE):
         parts = re.split(r"\s+vs\s+", query_text, maxsplit=1, flags=re.IGNORECASE)
-        if len(parts) < 2 or not parts[0].strip() or not parts[1].strip():
-            await ctx.send("⚠️ Vui lòng nhập đủ tên 2 xe! Ví dụ: `!wt t72b3 vs m1a2`")
-            return
-
         t1 = find_vehicle(parts[0].strip())
         t2 = find_vehicle(parts[1].strip())
 
-        embed = discord.Embed(
-            title=f"⚔️ PHÂN TÍCH TÁC CHIẾN: {t1['name']} VS {t2['name']}",
-            color=discord.Color.gold()
-        )
-        embed.add_field(
-            name=f"📊 {t1['name']}",
-            value=f"• BR: `{t1['br']}`\n• Tỷ lệ HP/tấn: `{t1['hp_ton']} HP/t` \n• Nạp đạn: `{t1['reload']}s`",
-            inline=True
-        )
-        embed.add_field(
-            name=f"📊 {t2['name']}",
-            value=f"• BR: `{t2['br']}`\n• Tỷ lệ HP/tấn: `{t2['hp_ton']} HP/t` \n• Nạp đạn: `{t2['reload']}s`",
-            inline=True
-        )
-
-        analysis = analyze_combat(t1, t2)
-        embed.add_field(
-            name=f"💡 Tại sao {t1['name']} vẫn có thể THUA {t2['name']}?",
-            value=analysis,
-            inline=False
-        )
-        embed.set_footer(text="War Thunder Tactical Engine • Powered by Discord Bot")
+        embed = discord.Embed(title=f"⚔️ PHÂN TÍCH: {t1['name']} VS {t2['name']}", color=discord.Color.gold())
+        embed.add_field(name=f"📊 {t1['name']}", value=f"• BR: `{t1['br']}`\n• HP/tấn: `{t1['hp_ton']}`\n• Nạp đạn: `{t1['reload']}s`", inline=True)
+        embed.add_field(name=f"📊 {t2['name']}", value=f"• BR: `{t2['br']}`\n• HP/tấn: `{t2['hp_ton']}`\n• Nạp đạn: `{t2['reload']}s`", inline=True)
+        embed.add_field(name=f"💡 Tại sao {t1['name']} có thể THUA {t2['name']}?", value=analyze_combat(t1, t2), inline=False)
         await ctx.send(embed=embed)
         return
 
-    # 3. TRƯỜNG HỢP: Tra cứu thông số 1 xe
     t = find_vehicle(query_text)
-    embed_single = discord.Embed(
-        title=f"🛡️ THÔNG SỐ PHƯƠNG TIỆN: {t['name']}",
-        color=discord.Color.green()
-    )
-    embed_single.add_field(name="🎯 Chỉ số BR (Battle Rating)", value=f"`{t['br']}`", inline=True)
-    embed_single.add_field(name="⚡ Tỷ lệ Tốc độ (HP/tấn)", value=f"`{t['hp_ton']} HP/t`", inline=True)
+    embed_single = discord.Embed(title=f"🛡️ THÔNG SỐ: {t['name']}", color=discord.Color.green())
+    embed_single.add_field(name="🎯 Battle Rating (BR)", value=f"`{t['br']}`", inline=True)
+    embed_single.add_field(name="⚡ Tỷ lệ HP/tấn", value=f"`{t['hp_ton']} HP/t`", inline=True)
     embed_single.add_field(name="⏱️ Tốc độ nạp đạn", value=f"`{t['reload']}s`", inline=True)
-    
-    stab_text = "✅ Có" if t.get('has_stab') else "❌ Không"
-    aphe_text = "✅ Có" if t.get('has_aphe') else "❌ Không"
-    
-    embed_single.add_field(name="🎯 Bộ cân bằng pháo (Stabilizer)", value=stab_text, inline=True)
-    embed_single.add_field(name="💥 Đạn APHE nổ", value=aphe_text, inline=True)
-
-    embed_single.set_footer(text="Gõ '!wt <xe1> vs <xe2>' để so sánh với xe khác")
+    embed_single.add_field(name="🎯 Stabilizer", value="✅ Có" if t['has_stab'] else "❌ Không", inline=True)
+    embed_single.add_field(name="💥 Đạn APHE", value="✅ Có" if t['has_aphe'] else "❌ Không", inline=True)
     await ctx.send(embed=embed_single)
 
-# Lấy Token an toàn từ biến môi trường của Host
 TOKEN = os.getenv("DISCORD_TOKEN")
 if TOKEN:
     bot.run(TOKEN)
-else:
-    print("❌ LỖI: Chưa cấu hình DISCORD_TOKEN trong phần Environment Variables của Host!")
