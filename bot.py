@@ -9,6 +9,8 @@ from discord.ext import commands
 # Kích hoạt Intents đọc tin nhắn
 intents = discord.Intents.default()
 intents.message_content = True
+intents.presences = True
+intents.members = True
 
 class WTBot(commands.Bot):
     def __init__(self):
@@ -61,7 +63,12 @@ async def start_server():
 
 @bot.event
 async def on_ready():
-    print(f"🤖 Bot {bot.user} đã sẵn sàng phân tích chiến thuật War Thunder!")
+    # Đổi trạng thái hoạt động giúp bot sáng đèn Online rõ ràng
+    await bot.change_presence(
+        status=discord.Status.online,
+        activity=discord.Game(name="War Thunder | !wt <xe1> vs <xe2>")
+    )
+    print(f"🤖 Bot {bot.user} đã ONLINE và ready phân tích chiến thuật War Thunder!")
 
 def _parse_vehicle_data(v_info: dict, query_name: str) -> dict:
     """Hàm phụ trợ bóc tách thông số xe an toàn"""
