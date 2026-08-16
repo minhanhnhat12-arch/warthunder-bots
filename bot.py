@@ -1,6 +1,7 @@
 import os
 import requests
 import discord
+from aiohttp import web
 from discord.ext import commands
 
 # Kích hoạt Intents đọc tin nhắn
@@ -25,8 +26,22 @@ def load_wt_database():
     except Exception as e:
         print(f"❌ Lỗi khi tải dữ liệu: {e}")
 
+async def handle(request):
+    return web.Response(text="Bot is running!")
+
+async def start_server():
+    app = web.Application()
+    app.router.add_get('/', handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    print(f"🌐 Health check server đang chạy trên cổng {port}")
+
 @bot.event
 async def on_ready():
+    await start_server()
     load_wt_database()
     print(f"🤖 Bot {bot.user} đã sẵn sàng phân tích chiến thuật War Thunder!")
 
