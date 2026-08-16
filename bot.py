@@ -1,4 +1,5 @@
 import os
+import aiohttp
 import requests
 import discord
 from aiohttp import web
@@ -13,21 +14,22 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 WT_DATA_URL = "https://raw.githubusercontent.com/gszep/war-thunder-data/master/data/json/vehicles.json"
 VEHICLES_DB = {}
 
-def load_wt_database():
+async def load_wt_database():
     global VEHICLES_DB
     try:
         print("🔄 Đang tải dữ liệu toàn bộ xe War Thunder từ GitHub...")
-        res = requests.get(WT_DATA_URL, timeout=10)
-        if res.status_code == 200:
-            VEHICLES_DB = res.json()
-            print(f"✅ Đã tải thành công dữ liệu War Thunder!")
-        else:
-            print("⚠️ Không thể lấy dữ liệu online, chuyển sang chế độ dữ liệu động.")
+        async with aiohttp.ClientSession() as session:
+            async with session.get(WT_DATA_URL, timeout=15) as res:
+                if res.status == 200:
+                    VEHICLES_DB = await res.json()
+                    print(f"✅ Đã tải thành công dữ liệu War Thunder ({len(VEHICLES_DB)} phương tiện)!")
+                else:
+                    print("⚠️ Không thể lấy dữ liệu online, chuyển sang chế độ dự phòng.")
     except Exception as e:
         print(f"❌ Lỗi khi tải dữ liệu: {e}")
 
 async def handle(request):
-    return web.Response(text="Bot is running!")
+    return web.Response(text="Bot War Thunder is running!")
 
 async def start_server():
     app = web.Application()
@@ -41,8 +43,8 @@ async def start_server():
 
 @bot.event
 async def on_ready():
-    await start_server()
-    load_wt_database()
+    bot.loop.create_task(start_server())
+    bot.loop.create_task(load_wt_database())
     print(f"🤖 Bot {bot.user} đã sẵn sàng phân tích chiến thuật War Thunder!")
 
 def find_vehicle(query_name: str):
