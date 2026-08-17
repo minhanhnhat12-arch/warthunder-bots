@@ -14,6 +14,8 @@ intents.message_content = True
 intents.presences = True
 intents.members = True
 
+WT_DATA_URL = "https://raw.githubusercontent.com/wt-db/wt-db/main/db/units.json"
+
 
 class WTBot(commands.Bot):
     def __init__(self):
@@ -41,51 +43,75 @@ class WTBot(commands.Bot):
         await site.start()
         print(f"🌐 Web server keep-alive đã khởi chạy tại port {port}")
 
-    async def load_wt_database(self):
+    async def load_wt_database(self, retries: int = 3):
         async with self._db_lock:
             if self.db_loading:
                 return
 
             self.db_loading = True
             self.db_ready = False
+            last_error = None
+
             try:
-                print("🔄 Đang tải dữ liệu toàn bộ xe War Thunder...")
-                session = await self.ensure_session()
-                timeout = aiohttp.ClientTimeout(total=25)
+                for attempt in range(1, retries + 1):
+                    try:
+                        print(f"🔄 Đang tải dữ liệu toàn bộ xe War Thunder... (Lần thử {attempt}/{retries})")
+                        session = await self.ensure_session()
+                        timeout = aiohttp.ClientTimeout(total=60, connect=15)
 
-                async with session.get(WT_DATA_URL, timeout=timeout) as res:
-                    if res.status == 200:
-                        payload = await res.json()
-                        if isinstance(payload, list):
-                            self.vehicles_db = {
-                                str(item.get("id") or item.get("identifier") or item.get("loc_name") or item.get("name") or idx): item
-                                for idx, item in enumerate(payload)
-                                if isinstance(item, dict)
-                            }
-                        elif isinstance(payload, dict):
-                            self.vehicles_db = payload
-                        else:
-                            self.vehicles_db = {}
+                        async with session.get(WT_DATA_URL, timeout=timeout) as res:
+                            if res.status == 200:
+                                try:
+                                    payload = await res.json()
+                                except aiohttp.ContentTypeError:
+                                    print(f"⚠️ Response không phải JSON hợp lệ (lần {attempt}/{retries})")
+                                    last_error = aiohttp.ContentTypeError("response is not valid JSON")
+                                    continue
 
-                        self.vehicle_index = _build_vehicle_index(self.vehicles_db)
-                        self.db_ready = bool(self.vehicle_index)
-                        print(f"✅ Đã tải thành công dữ liệu ({len(self.vehicles_db)} phương tiện)!")
-                        print(f"✅ Đã tạo index tìm kiếm cho {len(self.vehicle_index)} alias xe.")
-                    else:
-                        print(f"⚠️ Không thể tải dữ liệu. HTTP Code: {res.status}")
-            except asyncio.TimeoutError:
-                print("❌ Lỗi: Kết nối tới wt-db bị timeout!")
-                self.db_ready = False
-            except Exception as e:
-                print(f"❌ Lỗi khi tải dữ liệu: {e}")
-                self.db_ready = False
+                                if isinstance(payload, list):
+                                    self.vehicles_db = {
+                                        str(item.get("id") or item.get("identifier") or item.get("loc_name") or item.get("name") or idx): item
+                                        for idx, item in enumerate(payload)
+                                        if isinstance(item, dict)
+                                    }
+                                elif isinstance(payload, dict):
+                                    self.vehicles_db = payload
+                                else:
+                                    self.vehicles_db = {}
+
+                                self.vehicle_index = _build_vehicle_index(self.vehicles_db)
+                                self.db_ready = bool(self.vehicle_index)
+                                print(f"✅ Đã tải thành công dữ liệu ({len(self.vehicles_db)} phương tiện)!")
+                                print(f"✅ Đã tạo index tìm kiếm cho {len(self.vehicle_index)} alias xe.")
+                                return
+
+                            print(f"⚠️ Không thể tải dữ liệu. HTTP Code: {res.status} (lần {attempt}/{retries})")
+                            last_error = RuntimeError(f"HTTP {res.status}")
+                    except asyncio.TimeoutError as exc:
+                        last_error = exc
+                        print(f"❌ Lỗi: Kết nối tới wt-db bị timeout! (Lần {attempt}/{retries})")
+                    except aiohttp.ContentTypeError as exc:
+                        last_error = exc
+                        print(f"⚠️ Response không phải JSON hợp lệ (lần {attempt}/{retries})")
+                    except Exception as exc:
+                        last_error = exc
+                        print(f"❌ Lỗi khi tải dữ liệu (lần {attempt}/{retries}): {exc}")
+
+                    if attempt < retries:
+                        await asyncio.sleep(2.0 * attempt)
+                        print(f"🔁 Thử lại tải DB sau {2.0 * attempt}s...")
+
+                print("⚠️ Tải dữ liệu xe thất bại sau tất cả các lần thử. Bot sẽ thử lại khi có lệnh tiếp theo.")
+                if last_error is not None:
+                    print(f"📌 Lỗi cuối cùng: {last_error}")
             finally:
                 self.db_loading = False
 
     async def setup_hook(self):
         await self.ensure_session()
         asyncio.create_task(self.start_web_server())
-        await self.load_wt_database()
+        # Chạy ngầm việc tải database để bot không bị treo khi GitHub raw chậm hoặc timeout.
+        asyncio.create_task(self.load_wt_database())
 
     async def close(self):
         if self.web_runner is not None:
@@ -102,8 +128,6 @@ class WTBot(commands.Bot):
 
 
 bot = WTBot()
-
-WT_DATA_URL = "https://raw.githubusercontent.com/wt-db/wt-db/main/db/units.json"
 
 
 def _format_br(rank_value):
@@ -145,6 +169,14 @@ def _coerce_number(value):
         except ValueError:
             return None
     return None
+
+
+def _canonical_vehicle_key(value) -> str:
+    """Chuẩn hóa tên xe giữ nguyên prefix quốc gia, để tránh ghi đè giữa các xe cùng khung gầm."""
+    if not value:
+        return ""
+    text = str(value).lower()
+    return re.sub(r"[\s\-_]", "", text).replace("\u00a0", "")
 
 
 def _normalize_vehicle_key(value) -> str:
@@ -201,17 +233,23 @@ def _build_vehicle_index(db):
             if not alias:
                 continue
 
+            canonical_key = _canonical_vehicle_key(alias)
+            if canonical_key:
+                if canonical_key not in index or _should_replace_index_alias(alias_map.get(canonical_key), alias):
+                    index[canonical_key] = v_info
+                    alias_map[canonical_key] = alias
+
             norm_key = _normalize_vehicle_key(alias)
             if norm_key:
-                if norm_key not in index or _should_replace_index_alias(alias_map.get(norm_key), alias):
+                existing = index.get(norm_key)
+                if existing is None:
                     index[norm_key] = v_info
                     alias_map[norm_key] = alias
-
-            raw_clean = re.sub(r"[\s\-_]", "", str(alias).lower())
-            if raw_clean:
-                if raw_clean not in index or _should_replace_index_alias(alias_map.get(raw_clean), alias):
-                    index[raw_clean] = v_info
-                    alias_map[raw_clean] = alias
+                elif existing is not v_info:
+                    if not isinstance(existing, list):
+                        index[norm_key] = [existing, v_info]
+                    elif v_info not in existing:
+                        existing.append(v_info)
 
     return index
 
@@ -419,12 +457,36 @@ def _find_vehicle_suggestion(query_name: str, index: dict | None = None, limit: 
     if not q_clean or not isinstance(target_index, dict):
         return None
 
-    scored = []
+    q_prefix = q_clean[:3]
+    candidate_items = []
     for key, v_info in target_index.items():
-        if not key or key == q_clean:
+        if not key:
+            continue
+        if isinstance(v_info, list):
+            for item in v_info:
+                if isinstance(item, dict):
+                    candidate_items.append((key, item))
+            continue
+        if isinstance(v_info, dict):
+            candidate_items.append((key, v_info))
+
+    filtered = []
+    for key, v_info in candidate_items:
+        if key == q_clean:
+            continue
+        if q_prefix and (key.startswith(q_prefix) or q_clean.startswith(key[:3]) or q_prefix in key or key in q_prefix):
+            filtered.append((key, v_info))
+        elif len(q_clean) <= 3:
+            filtered.append((key, v_info))
+
+    if not filtered:
+        filtered = candidate_items
+
+    scored = []
+    for key, v_info in filtered:
+        if not key:
             continue
 
-        # So sánh trên key đã chuẩn hóa, tránh đánh giá sai vì chuỗi khác nhau về khoảng trắng hoặc ký tự đặc biệt.
         ratio = difflib.SequenceMatcher(None, q_clean, key).ratio()
         if q_clean in key or key in q_clean or ratio >= 0.68:
             name = v_info.get("loc_name") or v_info.get("name") or v_info.get("identifier") or v_info.get("id") or str(v_info)
@@ -456,11 +518,17 @@ def find_vehicle(query_name: str, index: dict | None = None):
     if target_index:
         exact_match = target_index.get(q_clean)
         if exact_match:
+            if isinstance(exact_match, list):
+                return _parse_vehicle_data(exact_match[0], query_name)
             return _parse_vehicle_data(exact_match, query_name)
 
         matches = []
         for key, v_info in target_index.items():
-            if q_clean in key:
+            if isinstance(v_info, list):
+                for item in v_info:
+                    if q_clean in key:
+                        matches.append((key, item))
+            elif q_clean in key:
                 matches.append((key, v_info))
 
         if matches:
@@ -549,9 +617,13 @@ async def compare_vehicles(ctx, *, query: str = "help"):
 
     if not getattr(bot, "db_ready", False):
         if getattr(bot, "db_loading", False):
-            await asyncio.sleep(0.5)
+            for _ in range(6):
+                await asyncio.sleep(0.5)
+                if getattr(bot, "db_ready", False):
+                    break
+
         if not getattr(bot, "db_ready", False):
-            await ctx.send("⏳ Database xe đang tải, vui lòng thử lại sau vài giây.")
+            await ctx.send("⏳ Database xe đang trong quá trình nạp dữ liệu từ Server (khoảng 10-15s). Vui lòng thử lại sau giây lát!")
             return
 
     if re.search(r"\s+vs\s+", query_text, flags=re.IGNORECASE):
