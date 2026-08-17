@@ -11,8 +11,6 @@ from discord.ext import commands
 # Kích hoạt Intents đọc tin nhắn
 intents = discord.Intents.default()
 intents.message_content = True
-intents.presences = True
-intents.members = True
 
 WT_DATA_URL = "https://raw.githubusercontent.com/wt-db/wt-db/main/db/units.json"
 
@@ -323,10 +321,29 @@ def _extract_reload_seconds(v_info: dict):
     if not isinstance(v_info, dict):
         return None
 
-    candidates = _scan_nested_items(v_info, ("reloadTime", "reload_time", "shotFreq", "shot_freq"))
+    # 1. Ưu tiên lấy reloadTime trực tiếp từ root level (main cannon)
+    for main_key in ("reloadTime", "reload_time"):
+        val = v_info.get(main_key)
+        if isinstance(val, (int, float)) and val > 0:
+            return round(float(val), 1)
 
-    for key, value in candidates:
-        normalized_key = str(key).lower()
+    # 2. Quét các vũ khí chính trong danh sách weapons
+    weapons = v_info.get("weapons")
+    if isinstance(weapons, list):
+        for w in weapons:
+            if isinstance(w, dict):
+                trigger = w.get("trigger")
+                # Ưu tiên pháo chính (main_caliber) hoặc gunner
+                if trigger in ("gunner", "main_caliber", None):
+                    for k in ("reloadTime", "reload_time"):
+                        val = w.get(k)
+                        if isinstance(val, (int, float)) and val > 0:
+                            return round(float(val), 1)
+
+    # 3. Fallback: quét đệ quy nếu cấu hình JSON phi chuẩn, nhưng tránh nhầm với súng máy đồng trục.
+    candidates = _scan_nested_items(v_info, ("reloadTime", "reload_time"))
+
+    for _, value in candidates:
         if isinstance(value, str):
             cleaned = value.strip()
             if not cleaned:
@@ -340,15 +357,8 @@ def _extract_reload_seconds(v_info: dict):
         else:
             continue
 
-        if numeric <= 0:
-            continue
-
-        if "shot" in normalized_key or "freq" in normalized_key:
-            if numeric < 100:
-                return round(60 / numeric, 1)
+        if numeric > 0:
             return round(numeric, 1)
-
-        return round(numeric, 1)
 
     return None
 
@@ -515,6 +525,12 @@ def find_vehicle(query_name: str, index: dict | None = None):
     target_index = index if isinstance(index, dict) else getattr(bot, 'vehicle_index', {})
     q_clean = _normalize_vehicle_key(query_name)
 
+    # Chặn ngay nếu query rỗng hoặc chỉ chứa khoảng trắng/ký tự đặc biệt
+    if not q_clean:
+        fallback = dict(DEFAULT_VEHICLE)
+        fallback["name"] = query_name.strip().upper() or "UNKNOWN"
+        return _finalize_vehicle(fallback)
+
     if target_index:
         exact_match = target_index.get(q_clean)
         if exact_match:
@@ -581,20 +597,25 @@ def analyze_combat(t1: dict, t2: dict) -> str:
     return "\n".join(reasons)
 
 
-def _get_vehicle_image_url(v_info: dict):
+def _get_vehicle_image_url(v_info):
+    if isinstance(v_info, list):
+        if not v_info:
+            return None
+        v_info = v_info[0]
+
     if not isinstance(v_info, dict):
         return None
 
     for key in ("image", "image_url", "thumbnail", "icon", "small_image", "smallIcon"):
         value = v_info.get(key)
-        if value:
+        if value and not isinstance(value, (list, dict)):
             return str(value)
 
     images = v_info.get("images") or v_info.get("image_data") or {}
     if isinstance(images, dict):
         for key in ("small", "thumb", "thumbnail", "icon"):
             value = images.get(key)
-            if value:
+            if value and not isinstance(value, (list, dict)):
                 return str(value)
 
     return None
