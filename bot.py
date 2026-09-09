@@ -104,6 +104,36 @@ class WTBot(commands.Bot):
 
         last_error = None
         try:
+            # 1. Thử load từ file local trước
+            import os
+            local_db_path = os.path.join(os.path.dirname(__file__), "wt_data.json")
+            if os.path.exists(local_db_path):
+                print(f"📂 Tìm thấy file local: {local_db_path}")
+                try:
+                    import json
+                    with open(local_db_path, 'r', encoding='utf-8') as f:
+                        payload = json.load(f)
+                    
+                    if isinstance(payload, dict):
+                        self.vehicles_db = payload
+                    elif isinstance(payload, list):
+                        self.vehicles_db = {
+                            str(item.get("id") or item.get("identifier") or item.get("loc_name") or item.get("name") or idx): item
+                            for idx, item in enumerate(payload)
+                            if isinstance(item, dict)
+                        }
+                    else:
+                        self.vehicles_db = {}
+                    
+                    self.vehicle_index = _build_vehicle_index(self.vehicles_db)
+                    self.db_ready = bool(self.vehicle_index)
+                    print(f"✅ Đã load file local thành công ({len(self.vehicles_db)} phương tiện)!")
+                    print(f"✅ Đã tạo index tìm kiếm cho {len(self.vehicle_index)} alias xe.")
+                    return
+                except Exception as e:
+                    print(f"⚠️ Lỗi load file local: {e}")
+                    last_error = e
+            
             print(f"📡 Bắt đầu tải từ: {WT_DATA_URL}")
             for attempt in range(1, retries + 1):
                 try:
