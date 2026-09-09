@@ -488,11 +488,20 @@ def _extract_reload_seconds(v_info: dict):
 def _parse_vehicle_data(v_info: dict, query_name: str) -> dict:
     name = v_info.get("loc_name") or v_info.get("name") or query_name
 
-    rank_val = v_info.get("economicRankHistorical")
-    if rank_val is None:
-        rank_val = v_info.get("economicRankArcade", 0)
-
-    br = _format_br(rank_val)
+    # Ưu tiên BR trực tiếp từ data, nếu không có thì tính từ rank
+    if "br" in v_info and v_info["br"]:
+        try:
+            br = str(float(v_info["br"]))
+        except (ValueError, TypeError):
+            rank_val = v_info.get("economicRankHistorical")
+            if rank_val is None:
+                rank_val = v_info.get("economicRankArcade", 0)
+            br = _format_br(rank_val)
+    else:
+        rank_val = v_info.get("economicRankHistorical")
+        if rank_val is None:
+            rank_val = v_info.get("economicRankArcade", 0)
+        br = _format_br(rank_val)
 
     engine_hp = 0
     engine_data = v_info.get("engine") or v_info.get("horsePower") or 0
@@ -537,6 +546,16 @@ def _parse_vehicle_data(v_info: dict, query_name: str) -> dict:
         ammo_str = str(v_info.get("ammo", "")).lower()
         # Tránh nhầm với đạn súng máy
         has_aphe = "aphe" in ammo_str and "bullet" not in ammo_str
+    
+    # Nếu không có dữ liệu explicit, dùng BR để suy đoán
+    if not v_info.get("hasAPHE") and "br" not in v_info:
+        try:
+            br_val = float(br)
+            has_aphe = br_val <= 6.3
+            if not has_stab:
+                has_stab = br_val >= 7.7
+        except (ValueError, TypeError):
+            pass
 
     data = {
         "name": str(name).replace("_", " ").upper(),
