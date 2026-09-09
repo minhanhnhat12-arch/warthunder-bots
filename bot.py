@@ -731,6 +731,77 @@ def analyze_combat(t1: dict, t2: dict) -> str:
     return "\n".join(reasons)
 
 
+def _generate_vehicle_specs(br: float) -> dict:
+    """Generate realistic vehicle specs based on BR"""
+    br_idx = min(int((br - 1.0) * 10), 100)
+    
+    hp_base = 300 + (br_idx * 8)
+    mass_base = 20000 + (br_idx * 400)
+    reload_base = 8.0 - min(br_idx * 0.05, 3.5)
+    
+    has_stab = br >= 8.0
+    has_aphe = br <= 6.3
+    
+    return {
+        "horsePower": int(hp_base),
+        "mass": int(mass_base),
+        "reloadTime": round(reload_base, 1),
+        "hasStabilizer": has_stab,
+        "hasAPHE": has_aphe,
+    }
+
+
+async def add_vehicle_to_database(vehicle_name: str, br: float) -> tuple[bool, str]:
+    """Add a new vehicle to the database and save to JSON file"""
+    try:
+        # Validate BR range
+        if not (1.0 <= br <= 11.3):
+            return False, "❌ BR phải trong khoảng 1.0 - 11.3"
+        
+        # Normalize vehicle ID
+        v_id = re.sub(r"[\s\-]", "_", vehicle_name.lower())
+        
+        # Check if already exists
+        if v_id in bot.vehicles_db:
+            return False, f"❌ Xe **{vehicle_name}** đã tồn tại trong database!"
+        
+        # Generate full vehicle entry
+        specs = _generate_vehicle_specs(br)
+        new_vehicle = {
+            "id": v_id,
+            "name": vehicle_name,
+            "loc_name": vehicle_name,
+            "identifier": v_id,
+            "br": br,
+            "economicRankHistorical": max(1, int((br - 1.0) * 3 + 1)),
+            **specs
+        }
+        
+        # Add to in-memory database
+        bot.vehicles_db[v_id] = new_vehicle
+        
+        # Rebuild search index
+        bot.vehicle_index = _build_vehicle_index(bot.vehicles_db)
+        
+        # Save to JSON file
+        db_path = os.path.join(os.path.dirname(__file__), "wt_data.json")
+        try:
+            import json
+            sorted_db = {k: bot.vehicles_db[k] for k in sorted(bot.vehicles_db.keys())}
+            with open(db_path, 'w', encoding='utf-8') as f:
+                json.dump(sorted_db, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            # Rollback if save fails
+            del bot.vehicles_db[v_id]
+            bot.vehicle_index = _build_vehicle_index(bot.vehicles_db)
+            return False, f"❌ Lỗi lưu file: {str(e)[:50]}"
+        
+        return True, f"✅ Đã thêm **{vehicle_name}** (BR: {br}) vào database!\n📊 Tổng xe: {len(bot.vehicles_db)}"
+    
+    except Exception as e:
+        return False, f"❌ Lỗi: {str(e)[:100]}"
+
+
 def _get_vehicle_image_url(v_info):
     if isinstance(v_info, list):
         if not v_info:
@@ -794,6 +865,11 @@ async def help_command(ctx):
         inline=False
     )
     embed_help.add_field(
+        name="➕ Thêm xe mới (Admin only)",
+        value="`!addvehicle \"T-90M\" 11.3`\n`!addvehicle \"M1A2\" 10.7`",
+        inline=False
+    )
+    embed_help.add_field(
         name="🛠️ Lệnh tiện ích",
         value="`!test` - Kiểm tra tình trạng bot\n`!diag` - Chẩn đoán kết nối\n`!wthelp` - Xem hướng dẫn này",
         inline=False
@@ -828,6 +904,54 @@ async def diagnose(ctx):
         result = f"❌ {type(e).__name__}: {str(e)[:100]}"
     
     await msg.edit(content=diag_msg + result)
+
+
+@bot.command(name="addvehicle")
+async def add_vehicle_command(ctx, vehicle_name: str = None, br: str = None):
+    """Thêm xe mới vào database (Admin only)
+    
+    Cách dùng: !addvehicle "T-90M" 11.3
+    """
+    # Admin-only check
+    if not ctx.author.guild_permissions.administrator:
+        await ctx.send("❌ Chỉ **Admin** mới có quyền thêm xe!")
+        return
+    
+    # Validate parameters
+    if not vehicle_name or not br:
+        await ctx.send("❌ Cách dùng: `!addvehicle \"Tên xe\" BR`\nVí dụ: `!addvehicle \"T-90M\" 11.3`")
+        return
+    
+    # Try to parse BR
+    try:
+        br_value = float(br)
+    except ValueError:
+        await ctx.send(f"❌ BR phải là số! Bạn nhập: `{br}`")
+        return
+    
+    # Clean up vehicle name (remove quotes if present)
+    vehicle_name = vehicle_name.strip('"\'')
+    
+    # Add vehicle to database
+    success, message = await add_vehicle_to_database(vehicle_name, br_value)
+    
+    if success:
+        embed = discord.Embed(
+            title="✅ Xe mới được thêm",
+            description=message,
+            color=discord.Color.green()
+        )
+        embed.add_field(name="🚗 Tên xe", value=vehicle_name, inline=True)
+        embed.add_field(name="🎯 BR", value=f"`{br_value}`", inline=True)
+        embed.add_field(name="📊 Database", value=f"`{len(bot.vehicles_db)} vehicles`", inline=True)
+        await ctx.send(embed=embed)
+    else:
+        embed = discord.Embed(
+            title="❌ Lỗi thêm xe",
+            description=message,
+            color=discord.Color.red()
+        )
+        await ctx.send(embed=embed)
 
 
 @bot.command(name="wt")
