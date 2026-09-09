@@ -53,6 +53,7 @@ class WTBot(commands.Bot):
 
         last_error = None
         try:
+            print(f"📡 Bắt đầu tải từ: {WT_DATA_URL}")
             for attempt in range(1, retries + 1):
                 try:
                     print(f"🔄 Đang tải dữ liệu toàn bộ xe War Thunder... (Lần thử {attempt}/{retries})")
@@ -60,12 +61,19 @@ class WTBot(commands.Bot):
                     timeout = aiohttp.ClientTimeout(total=60, connect=15)
 
                     async with session.get(WT_DATA_URL, timeout=timeout) as res:
+                        print(f"📊 HTTP Status: {res.status}")
                         if res.status == 200:
                             try:
+                                text = await res.text()
+                                print(f"📥 Dữ liệu nhận được: {len(text)} ký tự")
                                 payload = await res.json()
-                            except aiohttp.ContentTypeError:
-                                print(f"⚠️ Response không phải JSON hợp lệ (lần {attempt}/{retries})")
-                                last_error = aiohttp.ContentTypeError("response is not valid JSON")
+                            except aiohttp.ContentTypeError as e:
+                                print(f"⚠️ Response không phải JSON hợp lệ (lần {attempt}/{retries}): {e}")
+                                last_error = e
+                                continue
+                            except Exception as e:
+                                print(f"⚠️ Lỗi parse JSON (lần {attempt}/{retries}): {e}")
+                                last_error = e
                                 continue
 
                             if isinstance(payload, list):
@@ -79,6 +87,7 @@ class WTBot(commands.Bot):
                             else:
                                 self.vehicles_db = {}
 
+                            print(f"🔍 Vehicles DB có {len(self.vehicles_db)} mục")
                             self.vehicle_index = _build_vehicle_index(self.vehicles_db)
                             self.db_ready = bool(self.vehicle_index)
                             print(f"✅ Đã tải thành công dữ liệu ({len(self.vehicles_db)} phương tiện)!")
@@ -89,21 +98,24 @@ class WTBot(commands.Bot):
                         last_error = RuntimeError(f"HTTP {res.status}")
                 except asyncio.TimeoutError as exc:
                     last_error = exc
-                    print(f"❌ Lỗi: Kết nối tới wt-db bị timeout! (Lần {attempt}/{retries})")
-                except aiohttp.ContentTypeError as exc:
+                    print(f"❌ Lỗi: Kết nối tới wt-db bị timeout! (Lần {attempt}/{retries}): {exc}")
+                except aiohttp.ClientError as exc:
                     last_error = exc
-                    print(f"⚠️ Response không phải JSON hợp lệ (lần {attempt}/{retries})")
+                    print(f"❌ Lỗi HTTP client (lần {attempt}/{retries}): {exc}")
                 except Exception as exc:
                     last_error = exc
-                    print(f"❌ Lỗi khi tải dữ liệu (lần {attempt}/{retries}): {exc}")
+                    print(f"❌ Lỗi khi tải dữ liệu (lần {attempt}/{retries}): {type(exc).__name__}: {exc}")
+                    import traceback
+                    traceback.print_exc()
 
                 if attempt < retries:
-                    await asyncio.sleep(2.0 * attempt)
-                    print(f"🔁 Thử lại tải DB sau {2.0 * attempt}s...")
+                    wait_time = 2.0 * attempt
+                    await asyncio.sleep(wait_time)
+                    print(f"🔁 Thử lại tải DB sau {wait_time}s...")
 
             print("⚠️ Tải dữ liệu xe thất bại sau tất cả các lần thử. Bot sẽ thử lại khi có lệnh tiếp theo.")
             if last_error is not None:
-                print(f"📌 Lỗi cuối cùng: {last_error}")
+                print(f"📌 Lỗi cuối cùng: {type(last_error).__name__}: {last_error}")
         finally:
             self.db_loading = False
 
@@ -637,6 +649,34 @@ async def test_bot(ctx):
     await ctx.send(f"🤖 Bot online! Database: {db_status}\n📊 Vehicles loaded: {len(bot.vehicles_db)}")
 
 
+@bot.command(name="diag")
+async def diagnose(ctx):
+    """Chẩn đoán tình trạng bot"""
+    db_status = "✅ Ready" if bot.db_ready else "⏳ Loading..." if bot.db_loading else "❌ Not loaded"
+    
+    diag_msg = f"""
+📋 **CHẨN ĐOÁN BOT**
+🤖 Bot status: Online
+📊 DB Status: {db_status}
+🔹 Vehicles in DB: {len(bot.vehicles_db)}
+🔹 Indexed aliases: {len(bot.vehicle_index)}
+🔗 Data URL: {WT_DATA_URL[:50]}...
+
+**Thử kết nối tới URL...**
+"""
+    msg = await ctx.send(diag_msg)
+    
+    try:
+        session = await bot.ensure_session()
+        timeout = aiohttp.ClientTimeout(total=10, connect=5)
+        async with session.get(WT_DATA_URL, timeout=timeout) as res:
+            result = f"✅ HTTP {res.status}\n📥 Response size: {res.content_length} bytes"
+    except Exception as e:
+        result = f"❌ {type(e).__name__}: {str(e)[:100]}"
+    
+    await msg.edit(content=diag_msg + result)
+
+
 @bot.command(name="wt")
 async def compare_vehicles(ctx, *, query: str = "help"):
     query_text = query.strip()
@@ -655,13 +695,14 @@ async def compare_vehicles(ctx, *, query: str = "help"):
     # Nếu DB chưa sẵn sàng và cũng không trong quá trình nạp -> Gọi nạp lại ngay
     if not getattr(bot, "db_ready", False):
         if not getattr(bot, "db_loading", False):
+            print("⚠️ Database chưa sẵn sàng. Kích hoạt load lại...")
             asyncio.create_task(bot.load_wt_database())
 
         # Gửi tin nhắn loading và cập nhật trạng thái
         msg = await ctx.send("⏳ Đang tải dữ liệu xe War Thunder...")
         
-        # Cho bot chờ tối đa 15 giây (30 x 0.5s)
-        for i in range(30):
+        # Cho bot chờ tối đa 20 giây (40 x 0.5s)
+        for i in range(40):
             await asyncio.sleep(0.5)
             if getattr(bot, "db_ready", False):
                 await msg.edit(content="✅ Dữ liệu đã sẵn sàng! Đang xử lý...")
@@ -672,7 +713,9 @@ async def compare_vehicles(ctx, *, query: str = "help"):
                 await msg.edit(content=f"⏳ Đang tải dữ liệu... ({elapsed}s)")
 
         if not getattr(bot, "db_ready", False):
-            await msg.edit(content="❌ Database xe đang nạp hoặc dính lỗi mạng GitHub. M thử lại sau vài giây nhé!")
+            db_size = len(bot.vehicles_db)
+            index_size = len(bot.vehicle_index)
+            await msg.edit(content=f"❌ Database xe đang nạp hoặc dính lỗi mạng GitHub.\n📊 Dữ liệu hiện tại: {db_size} vehicles, {index_size} indexed.\nM thử lại sau vài giây nhé!")
             return
 
     if re.search(r"\s+vs\s+", query_text, flags=re.IGNORECASE):
