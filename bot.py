@@ -738,9 +738,49 @@ def _get_vehicle_image_url(v_info):
 
 @bot.command(name="test")
 async def test_bot(ctx):
-    """Kiểm tra bot đang chạy code mới"""
+    """Kiểm tra chi tiết tình trạng bot"""
     db_status = "✅ Ready" if bot.db_ready else "⏳ Loading..." if bot.db_loading else "❌ Not loaded"
-    await ctx.send(f"🤖 Bot online! Database: {db_status}\n📊 Vehicles loaded: {len(bot.vehicles_db)}")
+    
+    embed = discord.Embed(
+        title="🤖 BOT STATUS CHECK",
+        color=discord.Color.blue()
+    )
+    embed.add_field(name="🟢 Bot Status", value="Online", inline=True)
+    embed.add_field(name="📊 Database Status", value=db_status, inline=True)
+    embed.add_field(name="🚗 Total Vehicles", value=f"{len(bot.vehicles_db)}", inline=True)
+    embed.add_field(name="🔍 Indexed Aliases", value=f"{len(bot.vehicle_index)}", inline=True)
+    embed.add_field(name="💾 Database File", value="`wt_data.json`", inline=True)
+    embed.add_field(name="📌 Session", value=f"Uptime: Active", inline=True)
+    embed.set_footer(text="Use !wthelp for command guide")
+    
+    await ctx.send(embed=embed)
+
+
+@bot.command(name="wthelp")
+async def help_command(ctx):
+    """Hướng dẫn sử dụng bot War Thunder"""
+    embed_help = discord.Embed(
+        title="📖 HƯỚNG DẪN SỬ DỤNG BOT WAR THUNDER",
+        description="Bot tra cứu thông số & phân tích giao tranh War Thunder.",
+        color=discord.Color.blue()
+    )
+    embed_help.add_field(
+        name="🔍 Tra cứu 1 xe",
+        value="`!wt jagdtiger`\n`!wt t72b3`\n`!wt m48`",
+        inline=False
+    )
+    embed_help.add_field(
+        name="⚔️ So sánh 2 xe",
+        value="`!wt jagdtiger vs t72b3`\n`!wt leopard vs t34`",
+        inline=False
+    )
+    embed_help.add_field(
+        name="🛠️ Lệnh tiện ích",
+        value="`!test` - Kiểm tra tình trạng bot\n`!diag` - Chẩn đoán kết nối\n`!wthelp` - Xem hướng dẫn này",
+        inline=False
+    )
+    embed_help.set_footer(text="Bot hoạt động 24/7 trên Render")
+    await ctx.send(embed=embed_help)
 
 
 @bot.command(name="diag")
@@ -776,14 +816,8 @@ async def compare_vehicles(ctx, *, query: str = "help"):
     query_text = query.strip()
 
     if query_text.lower() == "help" or not query_text:
-        embed_help = discord.Embed(
-            title="📖 HƯỚNG DẪN SỬ DỤNG BOT WAR THUNDER",
-            description="Bot tra cứu thông số & phân tích giao tranh War Thunder.",
-            color=discord.Color.blue()
-        )
-        embed_help.add_field(name="🔍 Tra cứu 1 xe:", value="`!wt jagdtiger` | `!wt t72b3`", inline=False)
-        embed_help.add_field(name="⚔️ So sánh 2 xe:", value="`!wt jagdtiger vs t72b3`", inline=False)
-        await ctx.send(embed=embed_help)
+        # Redirect to !wthelp
+        await help_command(ctx)
         return
 
     # Nếu DB chưa sẵn sàng và cũng không trong quá trình nạp -> Gọi nạp lại ngay
