@@ -14,6 +14,65 @@ intents.message_content = True
 
 WT_DATA_URL = "https://raw.githubusercontent.com/wt-db/wt-db/main/db/units.json"
 
+# Fallback data nếu URL không hoạt động
+FALLBACK_VEHICLES = {
+    "jagdtiger": {
+        "id": "jagdtiger",
+        "name": "Jagdtiger",
+        "loc_name": "Jagdtiger",
+        "economicRankHistorical": 19,
+        "horsePower": 600,
+        "mass": 76000,
+        "reloadTime": 7.0,
+        "hasStabilizer": False,
+        "hasAPHE": True,
+    },
+    "t72b3": {
+        "id": "t72b3",
+        "name": "T-72B3",
+        "loc_name": "T-72B3",
+        "economicRankHistorical": 18,
+        "horsePower": 840,
+        "mass": 46000,
+        "reloadTime": 7.1,
+        "hasStabilizer": True,
+        "hasAPHE": True,
+    },
+    "leopard2a4": {
+        "id": "leopard2a4",
+        "name": "Leopard 2A4",
+        "loc_name": "Leopard 2A4",
+        "economicRankHistorical": 18,
+        "horsePower": 830,
+        "mass": 55150,
+        "reloadTime": 6.8,
+        "hasStabilizer": True,
+        "hasAPHE": True,
+    },
+    "m48_patton": {
+        "id": "m48_patton",
+        "name": "M48 Patton",
+        "loc_name": "M48 Patton",
+        "economicRankHistorical": 16,
+        "horsePower": 810,
+        "mass": 54432,
+        "reloadTime": 8.0,
+        "hasStabilizer": False,
+        "hasAPHE": False,
+    },
+    "is7": {
+        "id": "is7",
+        "name": "IS-7",
+        "loc_name": "IS-7",
+        "economicRankHistorical": 17,
+        "horsePower": 700,
+        "mass": 68000,
+        "reloadTime": 8.0,
+        "hasStabilizer": False,
+        "hasAPHE": True,
+    },
+}
+
 
 class WTBot(commands.Bot):
     def __init__(self):
@@ -94,6 +153,14 @@ class WTBot(commands.Bot):
                             print(f"✅ Đã tạo index tìm kiếm cho {len(self.vehicle_index)} alias xe.")
                             return
 
+                        elif res.status == 404:
+                            print(f"⚠️ HTTP 404: URL không tồn tại. Sử dụng fallback data...")
+                            self.vehicles_db = dict(FALLBACK_VEHICLES)
+                            self.vehicle_index = _build_vehicle_index(self.vehicles_db)
+                            self.db_ready = bool(self.vehicle_index)
+                            print(f"✅ Đã load fallback data ({len(self.vehicles_db)} phương tiện)!")
+                            return
+
                         print(f"⚠️ Không thể tải dữ liệu. HTTP Code: {res.status} (lần {attempt}/{retries})")
                         last_error = RuntimeError(f"HTTP {res.status}")
                 except asyncio.TimeoutError as exc:
@@ -113,7 +180,12 @@ class WTBot(commands.Bot):
                     await asyncio.sleep(wait_time)
                     print(f"🔁 Thử lại tải DB sau {wait_time}s...")
 
-            print("⚠️ Tải dữ liệu xe thất bại sau tất cả các lần thử. Bot sẽ thử lại khi có lệnh tiếp theo.")
+            # Fallback: Dùng dữ liệu mặc định nếu tất cả thử đều thất bại
+            print("⚠️ Tải dữ liệu từ URL thất bại. Sử dụng fallback data...")
+            self.vehicles_db = dict(FALLBACK_VEHICLES)
+            self.vehicle_index = _build_vehicle_index(self.vehicles_db)
+            self.db_ready = bool(self.vehicle_index)
+            print(f"✅ Đã load fallback data ({len(self.vehicles_db)} phương tiện)!")
             if last_error is not None:
                 print(f"📌 Lỗi cuối cùng: {type(last_error).__name__}: {last_error}")
         finally:
