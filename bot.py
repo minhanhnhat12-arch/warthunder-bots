@@ -16,61 +16,53 @@ WT_DATA_URL = "https://raw.githubusercontent.com/wt-db/wt-db/main/db/units.json"
 
 # Fallback data nếu URL không hoạt động
 FALLBACK_VEHICLES = {
-    "jagdtiger": {
-        "id": "jagdtiger",
-        "name": "Jagdtiger",
-        "loc_name": "Jagdtiger",
-        "economicRankHistorical": 19,
-        "horsePower": 600,
-        "mass": 76000,
-        "reloadTime": 7.0,
-        "hasStabilizer": False,
-        "hasAPHE": True,
-    },
-    "t72b3": {
-        "id": "t72b3",
-        "name": "T-72B3",
-        "loc_name": "T-72B3",
-        "economicRankHistorical": 18,
-        "horsePower": 840,
-        "mass": 46000,
-        "reloadTime": 7.1,
-        "hasStabilizer": True,
-        "hasAPHE": True,
-    },
-    "leopard2a4": {
-        "id": "leopard2a4",
-        "name": "Leopard 2A4",
-        "loc_name": "Leopard 2A4",
-        "economicRankHistorical": 18,
-        "horsePower": 830,
-        "mass": 55150,
-        "reloadTime": 6.8,
-        "hasStabilizer": True,
-        "hasAPHE": True,
-    },
-    "m48_patton": {
-        "id": "m48_patton",
-        "name": "M48 Patton",
-        "loc_name": "M48 Patton",
-        "economicRankHistorical": 16,
-        "horsePower": 810,
-        "mass": 54432,
-        "reloadTime": 8.0,
-        "hasStabilizer": False,
-        "hasAPHE": False,
-    },
-    "is7": {
-        "id": "is7",
-        "name": "IS-7",
-        "loc_name": "IS-7",
-        "economicRankHistorical": 17,
-        "horsePower": 700,
-        "mass": 68000,
-        "reloadTime": 8.0,
-        "hasStabilizer": False,
-        "hasAPHE": True,
-    },
+    # Germany
+    "jagdtiger": {"id": "jagdtiger", "name": "Jagdtiger", "loc_name": "Jagdtiger", "economicRankHistorical": 19, "horsePower": 600, "mass": 76000, "reloadTime": 7.0, "hasStabilizer": False, "hasAPHE": True},
+    "leopard2a4": {"id": "leopard2a4", "name": "Leopard 2A4", "loc_name": "Leopard 2A4", "economicRankHistorical": 18, "horsePower": 830, "mass": 55150, "reloadTime": 6.8, "hasStabilizer": True, "hasAPHE": True},
+    "leopard2a5": {"id": "leopard2a5", "name": "Leopard 2A5", "loc_name": "Leopard 2A5", "economicRankHistorical": 19, "horsePower": 830, "mass": 55150, "reloadTime": 6.5, "hasStabilizer": True, "hasAPHE": True},
+    "tiger2": {"id": "tiger2", "name": "Tiger II", "loc_name": "Tiger II", "economicRankHistorical": 16, "horsePower": 700, "mass": 69400, "reloadTime": 7.5, "hasStabilizer": False, "hasAPHE": True},
+    "panther": {"id": "panther", "name": "Panther", "loc_name": "Panther", "economicRankHistorical": 14, "horsePower": 700, "mass": 45500, "reloadTime": 7.5, "hasStabilizer": False, "hasAPHE": True},
+    
+    # USSR
+    "t72b3": {"id": "t72b3", "name": "T-72B3", "loc_name": "T-72B3", "economicRankHistorical": 18, "horsePower": 840, "mass": 46000, "reloadTime": 7.1, "hasStabilizer": True, "hasAPHE": True},
+    "t90a": {"id": "t90a", "name": "T-90A", "loc_name": "T-90A", "economicRankHistorical": 19, "horsePower": 1000, "mass": 46500, "reloadTime": 6.5, "hasStabilizer": True, "hasAPHE": True},
+    "is7": {"id": "is7", "name": "IS-7", "loc_name": "IS-7", "economicRankHistorical": 17, "horsePower": 700, "mass": 68000, "reloadTime": 8.0, "hasStabilizer": False, "hasAPHE": True},
+    "t34_100": {"id": "t34_100", "name": "T-34-100", "loc_name": "T-34-100", "economicRankHistorical": 15, "horsePower": 500, "mass": 32000, "reloadTime": 8.0, "hasStabilizer": False, "hasAPHE": True},
+    "su100": {"id": "su100", "name": "SU-100", "loc_name": "SU-100", "economicRankHistorical": 15, "horsePower": 520, "mass": 31600, "reloadTime": 9.0, "hasStabilizer": False, "hasAPHE": True},
+    
+    # USA
+    "m48_patton": {"id": "m48_patton", "name": "M48 Patton", "loc_name": "M48 Patton", "economicRankHistorical": 16, "horsePower": 810, "mass": 54432, "reloadTime": 8.0, "hasStabilizer": False, "hasAPHE": False},
+    "m48a5": {"id": "m48a5", "name": "M48A5", "loc_name": "M48A5", "economicRankHistorical": 17, "horsePower": 830, "mass": 53100, "reloadTime": 8.5, "hasStabilizer": False, "hasAPHE": False},
+    "m46_patton": {"id": "m46_patton", "name": "M46 Patton", "loc_name": "M46 Patton", "economicRankHistorical": 15, "horsePower": 810, "mass": 51900, "reloadTime": 8.0, "hasStabilizer": False, "hasAPHE": False},
+    "m26_pershing": {"id": "m26_pershing", "name": "M26 Pershing", "loc_name": "M26 Pershing", "economicRankHistorical": 14, "horsePower": 500, "mass": 41850, "reloadTime": 7.5, "hasStabilizer": False, "hasAPHE": False},
+    "t25": {"id": "t25", "name": "T25", "loc_name": "T25", "economicRankHistorical": 15, "horsePower": 500, "mass": 42000, "reloadTime": 7.5, "hasStabilizer": False, "hasAPHE": False},
+    
+    # Britain
+    "chieftain": {"id": "chieftain", "name": "Chieftain", "loc_name": "Chieftain", "economicRankHistorical": 17, "horsePower": 585, "mass": 51820, "reloadTime": 8.5, "hasStabilizer": False, "hasAPHE": True},
+    "challenger1": {"id": "challenger1", "name": "Challenger 1", "loc_name": "Challenger 1", "economicRankHistorical": 18, "horsePower": 1200, "mass": 62000, "reloadTime": 6.0, "hasStabilizer": True, "hasAPHE": False},
+    "centurion": {"id": "centurion", "name": "Centurion", "loc_name": "Centurion", "economicRankHistorical": 15, "horsePower": 650, "mass": 51100, "reloadTime": 7.5, "hasStabilizer": False, "hasAPHE": True},
+    "conqueror": {"id": "conqueror", "name": "Conqueror", "loc_name": "Conqueror", "economicRankHistorical": 16, "horsePower": 810, "mass": 68040, "reloadTime": 7.5, "hasStabilizer": False, "hasAPHE": True},
+    
+    # Japan
+    "type10": {"id": "type10", "name": "Type 10", "loc_name": "Type 10", "economicRankHistorical": 19, "horsePower": 1200, "mass": 50000, "reloadTime": 6.0, "hasStabilizer": True, "hasAPHE": True},
+    "type74": {"id": "type74", "name": "Type 74", "loc_name": "Type 74", "economicRankHistorical": 17, "horsePower": 750, "mass": 42000, "reloadTime": 8.5, "hasStabilizer": True, "hasAPHE": True},
+    "type61": {"id": "type61", "name": "Type 61", "loc_name": "Type 61", "economicRankHistorical": 15, "horsePower": 570, "mass": 35000, "reloadTime": 8.0, "hasStabilizer": False, "hasAPHE": True},
+    
+    # France
+    "amx30": {"id": "amx30", "name": "AMX-30", "loc_name": "AMX-30", "economicRankHistorical": 17, "horsePower": 680, "mass": 36000, "reloadTime": 8.0, "hasStabilizer": False, "hasAPHE": True},
+    "amx50": {"id": "amx50", "name": "AMX-50", "loc_name": "AMX-50", "economicRankHistorical": 16, "horsePower": 850, "mass": 50000, "reloadTime": 8.5, "hasStabilizer": False, "hasAPHE": True},
+    "lorraine40t": {"id": "lorraine40t", "name": "Lorraine 40t", "loc_name": "Lorraine 40t", "economicRankHistorical": 16, "horsePower": 1050, "mass": 40000, "reloadTime": 6.5, "hasStabilizer": False, "hasAPHE": True},
+    
+    # Sweden
+    "strv103": {"id": "strv103", "name": "Strv 103", "loc_name": "Strv 103", "economicRankHistorical": 17, "horsePower": 730, "mass": 42000, "reloadTime": 6.0, "hasStabilizer": False, "hasAPHE": True},
+    "leopard2": {"id": "leopard2", "name": "Leopard 2", "loc_name": "Leopard 2", "economicRankHistorical": 17, "horsePower": 830, "mass": 55150, "reloadTime": 7.0, "hasStabilizer": True, "hasAPHE": True},
+    
+    # China
+    "type59": {"id": "type59", "name": "Type 59", "loc_name": "Type 59", "economicRankHistorical": 15, "horsePower": 520, "mass": 36000, "reloadTime": 8.0, "hasStabilizer": False, "hasAPHE": True},
+    "type69": {"id": "type69", "name": "Type 69", "loc_name": "Type 69", "economicRankHistorical": 16, "horsePower": 580, "mass": 37500, "reloadTime": 8.0, "hasStabilizer": False, "hasAPHE": True},
+    
+    # Italy
+    "p40": {"id": "p40", "name": "P.40", "loc_name": "P.40", "economicRankHistorical": 13, "horsePower": 280, "mass": 25000, "reloadTime": 6.5, "hasStabilizer": False, "hasAPHE": False},
 }
 
 
