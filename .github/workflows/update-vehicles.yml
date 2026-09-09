@@ -1,0 +1,62 @@
+name: 🔄 Update War Thunder Database
+
+on:
+  schedule:
+    # Run every Sunday at 00:00 UTC (weekly update)
+    - cron: '0 0 * * 0'
+  
+  # Allow manual trigger from GitHub Actions tab
+  workflow_dispatch:
+
+jobs:
+  update-database:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests beautifulsoup4
+      
+      - name: 🌐 Run database updater
+        run: |
+          python update_db.py
+      
+      - name: 📝 Check for changes
+        id: changes
+        run: |
+          if git diff --quiet wt_data.json; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "Changes detected in wt_data.json"
+          fi
+      
+      - name: 📤 Commit and push updates
+        if: steps.changes.outputs.has_changes == 'true'
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+          git add wt_data.json
+          git commit -m "🔄 Auto-update War Thunder database ($(date +'%Y-%m-%d'))"
+          git push
+      
+      - name: ✅ Update complete
+        if: steps.changes.outputs.has_changes == 'true'
+        run: |
+          echo "✅ Database updated and pushed successfully!"
+      
+      - name: ℹ️ No changes needed
+        if: steps.changes.outputs.has_changes == 'false'
+        run: |
+          echo "ℹ️ Database already up-to-date, no changes needed"
