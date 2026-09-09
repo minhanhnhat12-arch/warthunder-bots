@@ -22,7 +22,7 @@
     "horsePower": 860,
     "mass": 48000,
     "reloadTime": 4.5,
-    "hasStabilizer": true,
+    "hasStabilizer": false,
     "hasAPHE": false
   },
   "ariete": {
@@ -7277,8 +7277,8 @@
     "br": 8.3,
     "horsePower": 1233,
     "mass": 70660,
-    "reloadTime": 5.6,
-    "hasStabilizer": true,
+    "reloadTime": 4.5,
+    "hasStabilizer": false,
     "hasAPHE": false
   },
   "fr_amx50_super": {
@@ -7291,8 +7291,8 @@
     "br": 9.0,
     "horsePower": 1287,
     "mass": 69846,
-    "reloadTime": 7.1,
-    "hasStabilizer": true,
+    "reloadTime": 5.0,
+    "hasStabilizer": false,
     "hasAPHE": false
   },
   "fr_leclerc": {
